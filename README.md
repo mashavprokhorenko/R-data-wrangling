@@ -1,2 +1,2 @@
 # R-data-wrangling
-Analyzed political campaign contributions for Presidential election primary
+Political campaign contributions from idivduals for Presidential 2016 election primary.
