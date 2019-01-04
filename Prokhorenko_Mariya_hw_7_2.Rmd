@@ -1,0 +1,916 @@
+---
+title: 'Homework 7: R Data Wrangling'
+author: "Mariya Prokhorenko"
+date: "11/5/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Loading Data
+Note: I had to set the path for my computer to find documents.
+```{r}
+setwd('/Users/Fletcher/Desktop/Georgetown/510 - Mathematical:Statistical Computing/Campaign/')
+ind <- get(load(file='camp.Rdata'))
+```
+
+# Exploring Data
+
+```{r}
+summary(ind)
+```
+
+```{r}
+head(ind)
+```
+
+# Setting up Magrittr and other packages
+
+```{r}
+options(stringsAsFactors = FALSE)
+library(dplyr)
+library(readr)
+library(lubridate)
+library(purrr)
+library(ggplot2)
+library(stringr)
+library(scales)
+library(gridExtra)
+library(rpart)
+library(rpart.plot)
+library(ranger)
+library(e1071)
+library(caret)
+library(Metrics)
+```
+# 1. Most Popular Occupations
+## Top Ten Most Popular Occupations
+The top 10 most popular occupations include N/A. Which for purposes of the graphing of the occupations N/A will be dropped, however it will not be dropped from overall dataframe for further analysis because it contains not insignificant amount of observations. 
+```{r}
+ind %>%
+  group_by(OCCUPATION) %>%
+  summarize(obs = n()) -> popular10
+
+popular10 %>%
+  arrange(desc(obs)) -> popular10
+head(popular10,10)
+```
+
+## Remove N/A
+Below are the top 10 most popular occupations omitting N/A.
+```{r}
+ind %>%
+  filter(!is.na(OCCUPATION)) %>%
+  group_by(OCCUPATION) %>%
+  summarize(obs = n()) -> popular10
+
+popular10 %>%
+  arrange(desc(obs)) -> popular10
+head(popular10,10)
+```
+## Data entered in OCCUPATIONS column
+Here, if we just look through the occupations (i.e. provided is randomly selected 20 occupations), there are a lot of misspellings and some even make no sense. Therefore, the results will not be very accurate for top 10 most popular occupations. 
+Clearly, the occupation is inputted as a plain text, which is not very helpful for data analysis. It would be much better if occupations were selected from the drop down list.
+```{r}
+sample(table(ind$OCCUPATION),20)
+```
+
+## Top Six Most Popular Occupations
+Below, are narrowed down to top six most popular occupations omitting N/A.
+```{r}
+head(popular10,6) -> popular6
+popular6
+```
+
+## Plot of Top Six Most Common Occupation Donation
+```{r, echo=FALSE}
+popular6 <- transform(popular6, OCCUPATION = reorder(OCCUPATION, obs))
+#options(repr.plot.width=6, repr.plot.height=20)
+ggplot(popular6, aes(x = reorder(as.character(OCCUPATION), obs), y=obs)) + 
+  geom_bar(stat="identity", fill = "slategray3")+
+  labs(x = "Occupation")+
+  coord_flip() + 
+  labs(title = "Top Six Most Common Occupation Donations")+
+  theme(plot.title = element_text(hjust = 0.5), axis.title.x = element_blank(), axis.title.y = element_blank(), panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())+
+  geom_text(aes(label = sprintf("%.0f%%", round((obs)/sum(obs) * 100))),
+            position = position_dodge(width = 0.9), hjust = -0.25, size = 3) +
+  scale_y_continuous(label=comma,  position = "right", breaks = scales::pretty_breaks(n = 10), limits = c(0, 1.05 * max(popular6$obs)))
+```
+
+## Analysis
+The majority of donors are retired people, which are an older sector of the population. Retired people are most likely donate by check compared to other age groups that donate primarily online, so their donation habits are different compared to other occupations. Therefore, it might take longer for the donations to come since retired people make up more than half of the top six occupations; so candidates experience the problem of lagging funds.
+
+## Interesting
+N/A, Not Employed, and Homemaker could possibly be combined, because these categorizations are based on people's perspectives and definitions of what it means to be a housewife or househusband. Some people would classify as N/A - meaning the occupation is not applicable if you are staying at home. Some people would consider staying at home as not employed, and some would chose homemaker as an occupation. 
+
+# 2. Joining and Cleaning
+I used functions from the class to help read the files and add the names to the columns faster.
+```{r}
+add_names <- function(df, file) {
+  names(df) <- names(read.csv(file))
+  df
+}
+
+read_fec <- function(file) {
+  read.csv(file, sep = '|', skipNul = T, na.strings = '', header = F, quote = "")
+}
+```
+
+## Primary Candidate data 
+I imported primary candidate data and the column names particularly for candidates' id, name, election year, political affiliation, and office. At the same time I filtered on "P" to get just the Presidential candidates.   
+
+Note: Professor Price said it was okay to add 'cn.txt' and 'cn_header_file.csv' files to Campaign folder. 
+```{r}
+'cn.txt' %>%
+  read_fec %>%
+  add_names('cn_header_file.csv') %>%
+  select(CAND_ID, CAND_NAME, CAND_ELECTION_YR, CAND_PTY_AFFILIATION, CAND_OFFICE) %>%
+  filter(CAND_OFFICE == 'P') %>%
+  select(-CAND_OFFICE) -> cand
+
+dim(cand)
+head(cand)
+```
+
+## Link candidates to committee
+I imported primary candidate data and the column names particularly for candidates' id, election year, and committee id. This information will be helpful in the next step.  
+
+Note: Professor Price said it was okay to add 'ccl.txt' and 'ccl_header_file.csv' files to Campaign folder. 
+```{r}
+'ccl.txt' %>%
+  read_fec %>%
+  add_names('ccl_header_file.csv') %>%
+  select(CAND_ID, CAND_ELECTION_YR, CMTE_ID) -> link
+
+dim(link)
+head(link)
+```
+
+## Link candidates to comittee
+```{r}
+cand %>%
+  inner_join(link, by = c("CAND_ID", "CAND_ELECTION_YR")) -> df
+
+dim(df)
+head(df)
+```
+
+## Link candidates to individuals
+This is an important step of joining df and ind dataframes to get a complete data set for further cleaning and analysis.
+```{r}
+df %>%
+  inner_join(ind, by = "CMTE_ID") -> df
+
+dim(df)
+head(df)
+```
+
+## Clean
+Not Useful Columns: CAND_ID, CMTE_ID, AMNDT_IND, RPT_TP, IMAGE_NUM, CITY, ZIP_CODE, OTHER_ID, TRAN_ID, FILE_NUM, SUB_ID    
+
+Useful Columns: CAND_NAME, CAND_ELECTION_YR, CAND_PTY_AFFILIATION, ENTITY_TP, STATE, OCCUPATION, TRANSACTION_DT, TRANSACTION_AMT
+
+## Select Relevant Columns
+```{r}
+df %>%
+  select(CAND_NAME, CAND_ELECTION_YR, CAND_PTY_AFFILIATION, ENTITY_TP, STATE, OCCUPATION, TRANSACTION_DT, TRANSACTION_AMT) -> df
+
+dim(df)
+head(df)
+```
+
+## Filter missing dates and format dates
+```{r}
+df %>%
+  filter(!is.na(TRANSACTION_DT)) %>%
+  mutate(date = as.Date(mdy(TRANSACTION_DT))) %>%
+  select(-TRANSACTION_DT) ->df
+
+dim(df)
+head(df)
+```
+
+## Filter missing candidates
+```{r}
+df %>%
+  filter(!is.na(CAND_NAME)) ->df
+
+dim(df)
+head(df)
+```
+
+## Filter missing amount
+```{r}
+df %>%
+  filter(!is.na(TRANSACTION_AMT)) ->df
+
+dim(df)
+head(df)
+```
+
+## Rename Columns
+```{r}
+df %>%
+  rename( name   = CAND_NAME,
+          year   = CAND_ELECTION_YR,
+          party = CAND_PTY_AFFILIATION,
+          type   = ENTITY_TP,
+          state = STATE,
+          occupation = OCCUPATION,
+          amount = TRANSACTION_AMT) ->df
+
+dim(df)
+head(df)
+```
+
+
+## Name Formatting 
+Dropping everything after "/", splitting on ",", and reverse order name
+```{r}
+df$name %>%
+  gsub("/.*","",.)%>%
+  str_split(", ") %>%
+  map_chr(~paste(.[[2]], .[[1]])) -> df$name
+
+dim(df)
+head(df)
+```
+
+## Only Individuals 
+Currently we have: COM, IND, ORG, PAC.
+I will leave only IND and drop everything else.
+```{r}
+table(df$type)
+```
+
+```{r}
+df %>%
+  filter(type %in% c('IND', 'CAN')) %>%
+  select(-type) -> df
+
+dim(df)
+head(df)
+```
+
+## Only 2016
+Currently we have: 2012 and 2016
+I will leave only 2016 and will drop 2012.
+```{r}
+table(df$year)
+```
+
+```{r}
+df %>%
+  filter(year ==2016) %>%
+  select(-year) -> df
+
+dim(df)
+head(df)
+```
+
+# 3. Popular Dataframe
+
+```{r}
+df %>%
+  group_by(name) %>%
+  summarise(obs = n(), total = sum(amount)) -> popular
+
+head(popular, 10)
+```
+
+# 4. Tables for Republican and Democratic Parties by Occupation
+
+## Democratic Table
+Below, is the table that represents top 10 occupations based on the number of donations.
+I grouped by occupation, filtered on democratic party, counted number of donations, found total of donations, and calculated average of donation amount per occupation.
+```{r}
+df %>%
+  group_by(occupation) %>%
+  filter(party=="DEM") %>% 
+  summarise(obs = n(), total = sum(amount), average2 = mean(amount)) %>%
+  mutate(average=round(average2,2)) %>%
+  select(-average2) %>%
+  arrange(desc(obs)) %>%
+  top_n(10, obs) -> pop_ocup_dem
+
+pop_ocup_dem
+```
+
+## Republican Table
+Below, is the table that represents top 10 occupations based on the number of donations.
+I grouped by occupation, filtered on republican party, counted number of donations, found total of donations, and calculated average of donation amount per occupation.
+```{r}
+df %>%
+  group_by(occupation) %>%
+  filter(party=="REP") %>% 
+  summarise(obs = n(), total = sum(amount), average2 = mean(amount)) %>%
+  mutate(average=round(average2,2)) %>%
+  select(-average2) %>%
+  arrange(desc(obs)) %>%
+  top_n(10, obs) -> pop_ocup_rep
+
+pop_ocup_rep 
+```
+
+# 5. Most Common Donation Sizes and Distribution
+Below is the table that represents top 20 most popular donation sizes.
+I grouped by amount, counted number of those amounts, the percent of all donations by count, total amount in dollars, and percent of all donations by dollar.
+```{r}
+df %>%
+  group_by(amount) %>%
+  summarise(obs = n()) %>%
+  mutate(perc_all_count = obs/nrow(df)) %>%
+  mutate(total = amount*obs) %>%
+  mutate(perc_all_donat = total/sum(df$amount))  %>%
+  arrange(desc(obs)) %>%
+  top_n(20, obs) -> pop_donation
+
+pop_donation
+```
+
+
+## Distribution
+Below, histogram shows that there are some donations were made after the election.
+```{r}
+ggplot(df, aes(date)) + geom_histogram(bins = 45)
+```
+
+## Filter donations after the election
+```{r}
+summary(df)
+```
+
+```{r}
+df %>%
+  filter(date < as.Date(mdy('11152016'))) %>%
+  filter(amount > 0)-> df
+dim(df)
+head(df)
+
+summary(df)
+```
+## Plot without log function
+We can see that a lot of amounts are around 0 and the distribution is heavily skewed to the right.
+```{r}
+ggplot(df, aes(amount)) + geom_histogram() 
+```
+
+
+## Histogram plot with log function
+Below distribution has values/amounts that are big, which are far from the median, that makes distribution extremely right skewed. Therefore, we have to log scale to get a decent distribution, from right skewed to more normal. 
+```{r}
+ggplot(df, aes(amount)) + geom_histogram() +scale_x_log10()
+```
+
+## Box and whisker plot
+
+We can also see that from the box and whisker plot. It is difficult to see without log transformation, but most of the values are around zero. From this graph, we can see better the outliers. We can see there are a lot of them below and above; most of the data is near the thick line. The furthest outlier is near $80,000.
+```{r}
+ggplot(df, aes(y=amount)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1)
+```
+
+## Box and whisker plot with log function
+
+After applying log scaling, the graph is more normalized. The graph still has outliers but at least we can see the distribution better. Most of the values are around zero and the graph is very right skewed. 
+```{r}
+ggplot(df, aes(y=amount)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + scale_y_log10()
+```
+
+# 6. Contributions to Each Candidate Weekly
+Below, the table shows the data grouped by name and date and summarized on the total amount of the donation each candidate received per day of the donation.
+```{r}
+df %>%
+  group_by(name, date) %>%
+  summarise(total = sum(amount)) -> df2
+
+dim(df2)
+head(df2)
+summary(df2)
+```
+
+## Creating all dates
+I created a data frame for all days starting from the lowest day to the highest day. This dataframe will help me find weekly contributions later.
+```{r}
+allDates <- 
+  data.frame(date = as.Date(min(df2$date) : max(df2$date), origin = origin))
+
+head(allDates)
+```
+
+## Adding all dates to the dataframe
+I joined df2 and allDates dataframe to assign a day for each candidate between lowest to highest.
+```{r}
+df2 %>%
+  split(.$name) %>%
+  map(~ full_join(., cbind(allDates, name = .$name[1]),
+                  by = c("name", "date"))) %>%
+  bind_rows %>%
+  arrange(name,date)-> df2
+
+ dim(df2)
+ head(df2)
+```
+## Replacing NAs with 0s
+The previous step creates NA values in total column that did not have an amount donated that day. Below function replaces all NAs with 0s.
+```{r}
+ df2$total <- ifelse(is.na(df2$total), 0, df2$total)
+
+ dim(df2)
+ head(df2)
+```
+
+## Add party to the dataframe
+My computer could not process (and R would crash) a joint with already previously created dataframe 'cand', so I had to create a separate one that just has name and party.
+```{r}
+df %>% 
+  distinct(name, .keep_all = TRUE) %>%
+  select(name, party) -> nameparty
+
+head(nameparty)
+```
+
+## Link party to the dataframe
+I need to have a party associated with each name, so I could separate Democratic and Republican weekly donations.
+```{r}
+df2 %>%
+  left_join(., nameparty, by = "name") -> df2
+
+head(df2)
+```
+
+## Add a week
+I added a week column, so each day would associate with a particular week. Later, I will sum the total column by each week.  
+```{r}
+df2 %>% 
+  mutate(week = format(date, format="%Y-%U"))-> df2
+
+head(df2)
+```
+
+## Sum by week
+Below, I arranged week in increasing order, grouped by name, week, and party, and summed donations in weektotal column.
+```{r}
+df2 %>% 
+  arrange(week) %>%
+  group_by(name, week, party) %>%
+  summarise(weektotal= sum(total)) -> df3
+
+head(df3,20)
+summary(df3)
+```
+
+## Weekly Donations for Republican Party
+Below, I filtered to have only Republican Party, grouped by name, and added another column to have cumulative total.
+```{r}
+df3 %>%
+  group_by(name) %>%
+  filter(party=="REP") %>%
+  mutate(cumulative = cumsum(weektotal))-> weekly_r
+
+dim(weekly_r)
+head(weekly_r)
+```
+
+## Weekly Donation for Democratic Party
+Below, I filtered to have only Democratic Party, grouped by name, and added another column to have cumulative total.
+```{r}
+df3 %>%
+  group_by(name) %>%
+  filter(party=="DEM") %>%
+  mutate(cumulative = cumsum(weektotal))-> weekly_d
+
+dim(weekly_d)
+head(weekly_d)
+```
+
+## Identify Top 5 Republican candidates
+Below are the top five Republican candidates who received the most donations in terms of dollars.
+```{r}
+weekly_r %>%
+  group_by(name) %>%
+  summarise(total = sum(weektotal)) %>%
+  arrange(desc(total)) %>%
+  top_n(5, total) -> top_weekly_r
+
+head(top_weekly_r)
+```
+
+## Identify Top 5 Democratic Candidates
+Below are the top five Democratic candidates who received the most donations in terms of dollars.
+```{r}
+weekly_d %>%
+  group_by(name) %>%
+  summarise(total = sum(weektotal)) %>%
+  arrange(desc(total)) %>%
+  top_n(5, total) -> top_weekly_d
+
+head(top_weekly_d)
+```
+## Aggregate non top 5 Republican candidates into 'other'
+```{r}
+weekly_r$name <- ifelse(weekly_r$name %in% top_weekly_r$name, weekly_r$name, 'OTHER')
+
+head(weekly_r)
+table(weekly_r$name)
+```
+
+## Aggregate non top 5 Democratic candidates into 'other'
+```{r}
+weekly_d$name <- ifelse(weekly_d$name %in% top_weekly_d$name, weekly_d$name, 'OTHER')
+
+head(weekly_d)
+table(weekly_d$name)
+```
+
+## Plot of weekly donation for Republican Party
+```{r}
+weekly_r$title <- "Weekly Donation Republican Party"
+p1 <- ggplot(weekly_r, aes(x=week, y=cumulative, colour = name, group = name, fill = name), size =1)+
+  geom_area(alpha=.2) +
+  scale_y_continuous(label = dollar)+
+  theme(legend.position="bottom", axis.text.x=element_text(size=rel(1), angle=90),
+        legend.key.size = unit(.8,"line"), legend.text = element_text(size=7))+
+  facet_grid(. ~ title)+
+  scale_x_discrete(breaks=c("2015-00","2015-26","2016-00","2016-26","2016-46"))
+
+p1
+```
+
+## Plot of weekly donation for Democratic Party
+I split between two graphs, because it was difficult to see them all being in one. Even with this split it is difficult to see Willie Wilson and OTHER donations. I chose to keep it to two graphs rather than three because the real estate is tight and I would have to make small fonts to fit them all, which would become difficult to read.
+```{r}
+weekly_d$big <- ifelse(weekly_d$name %in% c('BERNARD SANDERS' , 'HILLARY RODHAM  CLINTON'), "Weekly Donation Dem Candidates", "Weekly Donation Dem Primary")
+p2 <- ggplot(weekly_d, aes(x=week, y=cumulative, colour = name, group = name, fill = name), size =1)+
+  geom_area(alpha=.2) +
+  facet_wrap(~big, scales = "free")+
+  scale_y_continuous(label = dollar)+
+  theme(legend.position="bottom", axis.text.x=element_text(size=rel(1), angle=90),
+        legend.key.size = unit(.8,"line"), legend.text = element_text(size=7))+
+  scale_x_discrete(breaks=c("2015-00","2015-26","2016-00","2016-26","2016-46"))
+
+p2
+```
+
+# 7. Money Raised and Votes Received 
+
+Below, I grouped data by party, state, and name. I filtered to have only democratic and republican parties, counted how many donations were made, and how much money was raised pre candidate per sate.
+```{r}
+df %>%
+  group_by(party, state, name) %>%
+  filter(party=="DEM" | party=="REP") %>%
+  summarise(num_of_don = n(), raised = sum(amount)) -> by_state
+
+head(by_state)
+```
+
+## Import data from primary results
+Below, I imported data for primary results from the csv file to the dataframe.
+```{r}
+votes <- read.csv('primary_results.csv', header = T)
+
+head(votes)
+```
+
+## Number of votes by state by candidate 
+Below, I grouped data by state and candidate to get the total number of votes. 
+```{r}
+votes %>%
+  group_by(state_abbreviation, candidate) %>%
+  summarise(votes_received = sum(votes)) -> state_votes
+
+head(state_votes)
+```
+
+## Rename state_votes data frame
+Below, I renamed columns to match the names of columns in other dataframes previously created.
+```{r}
+state_votes %>%
+  rename( state = state_abbreviation,
+          name = candidate) -> state_votes
+head(state_votes)
+```
+
+## Clean names
+In order to create a joint between the by_state and the state_votes dataframes from previous step, I need to clean names in my by_state dataframe to match in state_votes.
+```{r}
+by_state %>%
+  mutate(name=replace(name, name == 'BENJAMIN S SR MD CARSON', 'Ben Carson')) %>%
+  mutate(name=replace(name, name == 'BERNARD SANDERS', 'Bernie Sanders')) %>%
+  mutate(name=replace(name, name == 'CARLY FIORINA', 'Carly Fiorina')) %>%
+  mutate(name=replace(name, name == 'CHRISTOPHER J CHRISTIE', 'Chris Christie')) %>%
+  mutate(name=replace(name, name == 'DONALD J.  TRUMP', 'Donald Trump')) %>%
+  mutate(name=replace(name, name == 'HILLARY RODHAM  CLINTON', 'Hillary Clinton')) %>%
+  mutate(name=replace(name, name == 'JEB BUSH', 'Jeb Bush')) %>%
+  mutate(name=replace(name, name == 'JOHN R KASICH', 'John Kasich')) %>%
+  mutate(name=replace(name, name == 'MARCO RUBIO', 'Marco Rubio')) %>%
+  mutate(name=replace(name, name == "MARTIN JOSEPH O'MALLEY", "Martin O'Malley")) %>%
+  mutate(name=replace(name, name == 'MIKE HUCKABEE', 'Mike Huckabee')) %>%
+  mutate(name=replace(name, name == 'RAND PAUL', 'Rand Paul')) %>%
+  mutate(name=replace(name, name == 'RICHARD J. SANTORUM', 'Rick Santorum')) %>%
+  mutate(name=replace(name, name == 'RAFAEL EDWARD "TED" CRUZ', 'Ted Cruz')) ->by_state
+
+table(by_state$name)
+```
+
+```{r}
+head(state_votes)
+head(by_state)
+```
+```{r}
+
+```
+
+## Join with votes received
+Now, I can join two data frames on state and name. I used inner join because it makes sense to only join on values that both data frames have, because I am doing analysis on money raised and votes received. It would make no difference if I made a right or left joint, because I would have a lot of NAs and since I would replace them with zeros, it would have no effect on my analysis.
+```{r}
+by_state %>%
+  inner_join(state_votes, by = c("state", "name")) -> outcome_by_state
+
+head(outcome_by_state)
+```
+
+## Add ratios 
+I added a ratio column to see in terms of percentages which candidate dominated the state in terms of votes received.
+```{r}
+outcome_by_state %>%
+  group_by(state, party) %>%
+  mutate( ratio_raised = round(raised/sum(raised),2)) -> outcome_by_state
+
+head(outcome_by_state)
+```
+
+# 8. Decision Trees and Random Forest
+
+## Import state facts data into R
+```{r}
+county_facts <- read.csv('county_facts.csv', header = T)
+head(county_facts)
+```
+
+## Join votes and county facts dataframes
+I joined votes dataframe, which I imported from part 7, with county fact with on the fips column. I did inner joint so that it only joins on the data in both dataframes. 
+```{r}
+votes%>%
+  inner_join(county_facts, by = c("fips")) -> facts_and_votes
+head(votes)
+head(facts_and_votes)
+```
+
+## Remove state_abbreviation.x, state, and fips columns
+```{r}
+facts_and_votes %>%
+  select(-state, -state_abbreviation.x, -fips, -county, -fraction_votes, -area_name)-> facts_and_votes
+head(facts_and_votes)
+```
+
+## Rename columns
+I renamed candidate and state_abbreviation.y columns to match with the other previously created dataframes.
+```{r}
+facts_and_votes %>%
+  rename( name   = candidate,
+          state = state_abbreviation.y) ->facts_and_votes
+head(facts_and_votes)
+```
+
+## Clean party names and select five state facts columns
+I cleaned party names going from 'Democrat' to 'DEM' and 'Republican' to 'REP' to make sure these match with other dataframes I previously created.
+
+Below are five sate facts I selected that I think might influence the money raised and primary outcomes.
+
+AGE775214, EDU685213, HSG096213, INC110213, POP060210   
+
+AGE775214 Persons 65 years and over, percent, 2014 - count   
+EDU685213	Bachelor's degree or higher, percent of persons age 25+, 2009-2013 - %   
+HSG096213	Housing units in multi-unit structures, percent, 2009-2013 - %   
+INC110213	Median household income, 2009-2013 - $   
+POP060210	Population per square mile, 2010 - count   
+```{r}
+facts_and_votes %>%
+  mutate(party=replace(party, party == 'Democrat', 'DEM')) %>%
+  mutate(party=replace(party, party == 'Republican', 'REP')) %>%
+  select(party, state, name, votes, AGE775214, EDU685213, HSG096213, INC110213, POP060210) ->facts_and_votes
+
+head(facts_and_votes)
+```
+
+## Group and summarize data
+I grouped data by party, state, and name and summarized numeric columns. 
+```{r}
+facts_and_votes %>%
+  group_by(party, state, name) %>%
+  summarize(votes_sum = sum(votes), age= mean(AGE775214), edu = mean(EDU685213), hs = mean(EDU685213) , inc= mean(INC110213), pop= mean(POP060210)) -> facts_and_votes_summarized
+head(facts_and_votes_summarized)
+summary(facts_and_votes_summarized)
+
+head(facts_and_votes_summarized)
+head(outcome_by_state)
+```
+
+## Join with outcome_by_state to get money raised
+I joined facts_and_votes_summarized with outcome_by_state, which I got from part 7. I dropped unneeded columns: num_of_don (i.e. number of donation) and votes_received.
+```{r}
+facts_and_votes_summarized %>%
+  inner_join(outcome_by_state, by = c('state', 'name', 'party')) %>%
+  select(-num_of_don, -votes_received, -ratio_raised) -> facts_votes_money_raised
+
+head(outcome_by_state)
+head(facts_votes_money_raised)
+```
+
+```{r}
+nrow(facts_votes_money_raised)
+```
+
+## Decision trees for money raised and votes received
+
+### Decision tree for money raised
+Analysis:
+Here, it stopped at three splits, there is not variation beyond this point. The facts that influence money raised:    
+•	Population per square mile, 2010 and     
+•	Bachelor's degree or higher, percent of persons age 25+, 2009-2013    
+These best predict money raised. However, these do not explain everything. For example, we can have a situation where the population might be similar between counties, but one might be richer than other. We cannot tell that form this tree diagram. 
+```{r}
+continuous.model <- rpart(raised ~ age+edu+hs+inc+pop, data = facts_votes_money_raised)
+rpart.plot(continuous.model)
+printcp(continuous.model)
+
+1.2463e+13*0.79329
+
+```
+
+### Random forest for money raised
+Analysis:
+Below is the root node error which is being calculated from training population. Since 0.9799418 is less than 1. That means that the random forest model has a higher error compared to the decision tree model. We can deduce that the decision tree model does better compared to the random forest. 
+```{r}
+continuous.model1 <- ranger(raised ~ age+edu+hs+inc+pop, data = facts_votes_money_raised)
+continuous.model1$r.squared
+continuous.model1$prediction.error
+
+
+continuous.model1$prediction.error/1.270854e+13
+
+```
+ 
+
+### Create random forest model using caret package
+```{r}
+set.seed(123)
+test_idx <- sample(length(facts_votes_money_raised$raised), 11)
+test_set <- facts_votes_money_raised[test_idx, ]
+train_set <- facts_votes_money_raised[-test_idx, ]
+```
+
+### Forest model
+```{r}
+forest_model <- train(train_set[,5:9],
+                      train_set$raised,
+                      method="ranger",
+                      tuneGrid = data.frame(mtry =3, splitrule ="variance", min.node.size =3),
+                      trControl = trainControl(method = "none"))
+forest_model
+```
+
+### Tree model
+```{r}
+tree_model <- train(train_set[,5:9],
+                    train_set$raised,
+                    method = "rpart")
+
+tree_model
+```
+
+### Compare accuracy of two models
+```{r}
+forest_predict <- predict(forest_model, newdata = test_set[,5:9])
+tree_predict <- predict(tree_model, newdata = test_set[,5:9])
+```
+
+### Predict on new data
+```{r}
+errors <- data.frame( rf = forest_predict, dt = tree_predict, actual = test_set$raised)
+```
+
+### Plot errors
+Analysis:
+There are too few data points to see the pattern, but we can see a few points being far from zero, meaning those points have high error value, even though the values were log transformed, there are still outliers.
+```{r}
+ggplot(errors, aes(x=actual, color = log(abs(actual -rf)))) + geom_point(aes(y=log(abs(actual -rf))))
+ggplot(errors, aes(x=actual, color = log(abs(actual -dt)))) + geom_point(aes(y=log(abs(actual -dt))))
+```
+
+### Compare errors
+Analysis:
+In a perfect world you want errors to be as close to 0 as possible. We can see that that the ratios are  less than 1, meaning that the bottom number is larger than the top. m1, r1 and m2, r2 are mean squared error and root squared error for the random forest prediction and decision tree prediction, respectively. Since m1 and r1 are the bottom number, which correspond to random forest prediction, we can say that the error is greater than the decision tree prediction. Therefore, in this case the diction tree prediction model is the better one. 
+
+Here, the root node error is being calculated from the test set. We could see earlier that this number is higher compared to the one calculated in from the training set (i.e. 0.7779629). This is a normal behavior, because the model will perform well on a training set and will perform less well on a test set.
+```{r}
+m1 <- mse(forest_predict, test_set$raised)
+r1 <- rmse(forest_predict, test_set$raised)
+
+m2 <- mse(tree_predict, test_set$raised)
+r2 <- rmse(tree_predict, test_set$raised)
+
+m2/m1
+r2/r1
+```
+
+
+### Decision tree for votes received
+Analysis:
+Here, it stopped at six splits, there is not variation beyond this point. Using the following state facts:     
+•	Population per square mile, 2010     
+•	Bachelor's degree or higher, percent of persons age 25+, 2009-2013    
+•	Persons 65 years and over, percent, 2014    
+These best predict the votes won. 
+```{r}
+continuous.model2 <- rpart(votes_sum ~ age+edu+hs+inc+pop, data = facts_votes_money_raised)
+rpart.plot(continuous.model2)
+printcp(continuous.model2)
+
+8.0396e+10*0.55343
+
+```
+### Random forest for votes received
+Analysis:
+Below is the root node error which is being calculated from training population. Since 0.9933917 is less than 1. That means that the random forest model has a higher error compared to the decision tree model. We can deduce that the decision tree model does better compared to the random forest.
+```{r}
+continuous.model2 <- ranger(votes_sum ~ age+edu+hs+inc+pop, data = facts_votes_money_raised)
+continuous.model2$r.squared
+continuous.model2$prediction.error
+
+
+continuous.model2$prediction.error/49890924836
+
+```
+
+### Create random forest model using caret package
+```{r}
+set.seed(123)
+test_idx2 <- sample(length(facts_votes_money_raised$votes_sum), 11)
+test_set2 <- facts_votes_money_raised[test_idx2, ]
+train_set2 <- facts_votes_money_raised[-test_idx2, ]
+```
+
+### Forest model
+```{r}
+forest_model2 <- train(train_set2[,5:9],
+                      train_set2$votes_sum,
+                      method="ranger",
+                      tuneGrid = data.frame(mtry =3, splitrule ="variance", min.node.size =3),
+                      trControl = trainControl(method = "none"))
+forest_model2
+```
+
+### Tree model
+```{r}
+tree_model2 <- train(train_set2[,5:9],
+                    train_set2$votes_sum,
+                    method = "rpart")
+
+tree_model2
+```
+
+### Compare accuracy of two models
+```{r}
+forest_predict2 <- predict(forest_model2, newdata = test_set2[,5:9])
+tree_predict2 <- predict(tree_model2, newdata = test_set2[,5:9])
+```
+
+### Predict on new data
+```{r}
+errors2 <- data.frame( rf2 = forest_predict2, dt2 = tree_predict2, actual2 = test_set2$votes_sum)
+```
+
+### Plot errors
+Analysis:
+There are too few data points to see the pattern, but we can see a few points being far from zero, meaning those points have high error value, even though the values were log transformed, there are still outliers.
+```{r}
+ggplot(errors2, aes(x=actual2, color = log(abs(actual2 -rf2)))) +
+  geom_point(aes(y=log(abs(actual2 -rf2))))
+ggplot(errors2, aes(x=actual2, color = log(abs(actual2 -dt2)))) +
+  geom_point(aes(y=log(abs(actual2 -dt2))))
+```
+
+### Compare errors
+Analysis:
+In a perfect world you want errors to be as close to 0 as possible. We can see that that the ratios are >0, meaning that the top number is larger than the bottom. f1, g1 and f2, g2 are mean squared error and root squared error for the random forest prediction and decision tree prediction, respectively. Since f2 and g2 are the top numbers, which correspond to decision tree prediction, we can say that the error is greater than the random forest prediction. Therefore, in this case the random forest prediction model is the better one. 
+
+Here, the root node error is being calculated from the test set. We could see earlier that this number is higher compared to the one calculated in from the training set (i.e. 0.9933917). This is a normal behavior, because the model will perform well on a training set and will perform less well on a test set. 
+
+One thing can go wrong with the votes won, is the way how the political system works in the United Sates. Because it is not necessarily based on the popular vote, you might be predicting something that does not matter at the end.
+```{r}
+f1 <- mse(forest_predict2, test_set2$votes_sum)
+g1 <- rmse(forest_predict2, test_set2$votes_sum)
+
+f2 <- mse(tree_predict2, test_set2$votes_sum)
+g2 <- rmse(tree_predict2, test_set2$votes_sum)
+
+f2/f1
+g2/g1
+```
+
+
